@@ -1,0 +1,131 @@
+---
+title: "Predict activity exercise using Using devices such as Jawbone Up, Nike FuelBand,
+  and Fitbit"
+author: "Rafik Margarayan, MD, PhD"
+date: "21 June 2014"
+output:
+  html_document:
+    theme: spacelab
+---
+
+
+# Introduction 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+# Methods
+## Data
+
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv).
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv). The data for this project come from this [source](http://groupware.les.inf.puc-rio.br/har).
+
+The data can be downloaded using the following R script.
+
+```{r, echo=FALSE, results='hide'}
+downloadFiles<-function(
+    dataURL="", destF="t.csv"
+    ){
+        if(!file.exists(destF)){
+            download.file(dataURL, destF, method="curl")
+        }else{
+            message("data already downloaded.")
+        }
+    }
+```
+
+## Loading training and testing dataset
+```{r, echo=FALSE, cache=TRUE}
+trainURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+downloadFiles(trainURL, "pml-training.csv")
+downloadFiles(testURL, "pml-test.csv")
+```
+After having downloaded read data file using simple `read.csv()` function as follows:
+```{r, echo=FALSE, cache=TRUE}
+training <- read.csv("pml-training.csv",na.strings=c("NA",""))
+testing <-read.csv("pml-test.csv",na.strings=c("NA",""))
+```
+We give two values to `na.string`: `NA` and blank values. After having read data into `R` we check the dimentions of the training and test data and stracture:
+```{r, echo=FALSE}
+dim(training); dim(testing)
+str(training)
+```
+Let's look the outcome variable which is called `classe` using `table()` function. 
+```{r, echo=FALSE}
+table(training$classe)
+```
+
+To remove missing valuses or blank spaces we will use following script in `R`:
+```{r}
+var <- names(training)[apply(training,2,function(x) table(is.na(x))[1]==19622)]   
+train2<- training[,var]
+test2 <- testing[,c(var[-length(var)],names(testing)[length(testing)])] # test dataset no classe variable
+```
+Thereafter, we will discard the unsueful predictors, leaving only numeric variables. 
+```{r, echo=FALSE}
+removeIndex <- grep("timestamp|X|user_name|new_window|num_window",names(train2))
+train3 <- train2[,-c(removeIndex, length(train2))]
+test3  <- test2[,-c(removeIndex, length(test2))]
+```
+
+# Results
+
+Now we will proceed foreward with `caret` package, which is very powerful package for prediction and will use some usefull fonctions from it. We will `nearZeroVar()` function to find new zero variance variables and discard them. 
+```{r, echo=FALSE}
+library(caret)
+nzv <- nearZeroVar(train3, saveMetrics=TRUE)
+nzv
+nzv[nzv$nzv,]
+```
+Now we create the correlation matrix to find out correlated variable. 
+```{r, echo=FALSE, fig.keep='high'}
+corrM <- cor(train3)
+library(corrplot)
+corrplot(corrM, method="circle",tl.cex=0.5)
+```
+To remove highly correlated variables filtering them out from the `train` data. 
+```{r, echo=FALSE}
+highCorr <- findCorrelation(corrM, cutoff = .75)  
+train4<-cbind(classe=train2$classe,train3[,-highCorr])
+test4 <- test3[, -highCorr] 
+```
+
+## Split training dataset
+Now we will split training dataset into training/testing for model evaulation using 3/4 in training part and 1/3 in test. Setting seed in fixed number will keep the report reproducable. 
+```{r, echo=FALSE}
+set.seed(1234)
+inTrain = createDataPartition(train4$classe, p = 3/4)[[1]]
+trainPart = train4[ inTrain,]
+testPart =  train4[-inTrain,]
+```
+For model building we will use one of very effective algorithms, like `randomForest`. I will use only 10 tree for sake of short computation. 
+```{r, echo=FALSE, cache=TRUE}
+rfModel <- train(trainPart$classe ~ .,data = trainPart,method="rf",ntree=10)
+```
+
+Now we will plot the model to see Error using `plot()` generic function in `R`:
+
+```{r, echo=FALSE,fig.keep='high'}
+plot(rfModel)
+```
+We will plot also variable importance wiht `varImpPlot()` function from `caret` package.
+
+```{r, echo=FALSE}
+plot(varImp(rfModel))
+```
+
+
+```{r,echo=FALSE}
+out.test<-predict(rfModel,testPart) 
+confusionMatrix(out.test,testPart$classe)$table
+```
+So we have reached overall accuracy around the 98%, which is very promissing. I we could have better computing capabilites, we could get even 100%. 
+K-fold cross validataion could take too much computing time, and we will avoid it. 
+Now we will go over test data. We have 20 observations. 
+
+```{r,echo=FALSE}
+final.test<-predict(rfModel,testing) 
+table(final.test)
+```
